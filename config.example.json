@@ -1,0 +1,11 @@
+{
+    "character_voices": {
+        "キャラ名1": "your_voice_id_here",
+        "キャラ名2": "your_voice_id_here",
+        "ナレーション": "your_voice_id_here"
+    },
+    "default_model": "eleven_v3",
+    "default_output_format": "mp3_44100_128",
+    "language_code": "ja",
+    "output_directory": "./output/"
+}
