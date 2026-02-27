@@ -2,6 +2,8 @@
 
 キャラ名とセリフをコピペ → 自動でキャラごとのvoice_idに紐づけ → ElevenLabs APIで音声生成するツール
 
+**YMM4自動配置機能付き**: 生成した音声をYMM4のタイムラインに自動配置できます
+
 ## セットアップ
 
 ### 1. 依存パッケージのインストール
@@ -115,6 +117,90 @@ python generate.py -y
 | `eleven_multilingual_v2` | 安定・高品質 |
 | `eleven_flash_v2_5` | 超低遅延75ms |
 | `eleven_turbo_v2_5` | 低遅延バランス型 |
+
+---
+
+## YMM4 自動配置ツール
+
+生成した音声ファイルをYMM4（ゆっくりMovieMaker4）のタイムラインに自動配置します。
+
+### YMM4用の設定
+
+`config.json` に以下を追加:
+
+```json
+{
+    "ymm4": {
+        "template_path": "D:\\YMM4編集\\テンプレート.ymmp",
+        "voice_base_dir_win": "D:\\YMM4編集\\ボイス",
+        "gap_seconds": 0.3,
+        "default_volume": 50.0
+    }
+}
+```
+
+| キー | 説明 |
+|------|------|
+| `template_path` | キャラ登録済みのテンプレート.ymmpファイルのパス |
+| `voice_base_dir_win` | YMM4から見た音声フォルダの基底パス |
+| `gap_seconds` | セリフ間の間隔（秒） |
+| `default_volume` | デフォルト音量 |
+
+### 使い方
+
+```bash
+# 基本的な使い方（output/フォルダの音声を使用）
+python ymm4_generate.py --script-name "台本名"
+
+# 音声フォルダを指定
+python ymm4_generate.py --audio-dir ./output --script-name "バレンタイン台本"
+
+# すべてのオプションを指定
+python ymm4_generate.py --audio-dir D:\voices --template D:\template.ymmp --output D:\result.ymmp
+```
+
+### オプション
+
+| オプション | 説明 |
+|-----------|------|
+| `--audio-dir`, `-a` | 音声フォルダのパス（省略時: config.jsonのoutput_directory） |
+| `--script-name`, `-s` | 台本名（出力ファイル名とWindowsパスに使用） |
+| `--template`, `-t` | テンプレート.ymmpのパス |
+| `--output`, `-o` | 出力.ymmpのパス |
+| `--voice-base-dir`, `-v` | Windowsでの音声フォルダパス |
+| `--gap`, `-g` | セリフ間の間隔（秒） |
+| `--volume` | 音量 |
+
+### 出力ファイル形式
+
+`generate.py` の出力形式に対応:
+```
+1_キリノ_ありがとうございます.mp3
+2_ヴァルキューレモブ_こちらこそよろしく.mp3
+3_キリノ_それでは始めましょう.mp3
+```
+
+### 機能
+
+- テンプレートからキャラクター設定（字幕色など）を自動継承
+- キャラの登場順でレイヤーを自動割り当て
+- 音声の長さを取得してFrame位置を自動計算
+- セリフ間の間隔を設定可能
+- テンプレートに未登録のキャラがある場合は警告表示
+
+### ワークフロー
+
+```bash
+# 1. ElevenLabsで音声生成
+python generate.py
+
+# 2. YMM4用.ymmpを生成
+python ymm4_generate.py --script-name "バレンタイン台本"
+
+# 3. 生成された.ymmpをYMM4で開く
+```
+
+---
 
 ## 注意事項
 

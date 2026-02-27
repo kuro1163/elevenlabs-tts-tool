@@ -7,5 +7,11 @@
     "default_model": "eleven_v3",
     "default_output_format": "mp3_44100_128",
     "language_code": "ja",
-    "output_directory": "./output/"
+    "output_directory": "./output/",
+    "ymm4": {
+        "template_path": "D:\\YMM4編集\\テンプレート.ymmp",
+        "voice_base_dir_win": "D:\\YMM4編集\\ボイス",
+        "gap_seconds": 0.3,
+        "default_volume": 50.0
+    }
 }
