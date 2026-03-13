@@ -1,3 +1,4 @@
 elevenlabs>=1.0.0
 python-dotenv>=1.0.0
 mutagen>=1.47.0
+pyinstaller>=6.0.0

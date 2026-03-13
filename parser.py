@@ -1,6 +1,8 @@
 """
 テキストパーサー: 台本形式のテキストからキャラ名とセリフを抽出
 """
+import csv
+import io
 import re
 from dataclasses import dataclass
 
@@ -27,8 +29,28 @@ def parse_dialogue(text: str) -> list[DialogueLine]:
     対応フォーマット:
     1. **①キャラ名**（XX字）+ コードブロック内のセリフ
     2. キャラ名\tセリフ\t文字数（タブ区切り）
+    3. 連番キャラ名_セリフ（アンダースコア区切り）
     """
     lines = []
+    
+    # パターン0: 連番キャラ名_セリフ 形式（例: 1先生_はぁ、はぁ...）
+    underscore_pattern = r'^(\d+)([^_]+)_(.+)$'
+    for line in text.strip().split('\n'):
+        line = line.strip()
+        if not line:
+            continue
+        match = re.match(underscore_pattern, line)
+        if match:
+            index_str, character, dialogue = match.groups()
+            lines.append(DialogueLine(
+                index=int(index_str),
+                character=character.strip(),
+                text=dialogue.strip(),
+                char_count=len(dialogue.strip())
+            ))
+    
+    if lines:
+        return lines
     
     # パターン1: **①キャラ名**（XX字）形式 + コードブロック
     pattern1 = r'\*\*[①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳㉑㉒㉓㉔㉕㉖㉗㉘㉙㉚]?(\d*)([^\*]+)\*\*[（(](\d+)字[）)]'
@@ -153,8 +175,42 @@ def parse_dialogue(text: str) -> list[DialogueLine]:
     return lines
 
 
+def parse_from_csv(filepath: str) -> list[DialogueLine]:
+    """CSV分割ツール出力のCSVからパース。
+
+    期待するフォーマット（ヘッダー行あり）:
+        連番,キャラ名,セリフ,...
+        1,アカリ,ねえ先生！,...
+    列順は固定: col[0]=連番, col[1]=キャラ名, col[2]=セリフ
+    """
+    lines = []
+    with open(filepath, 'r', encoding='utf-8-sig') as f:
+        reader = csv.reader(f)
+        next(reader, None)  # ヘッダーをスキップ
+        for row in reader:
+            if len(row) < 3:
+                continue
+            try:
+                index = int(row[0])
+            except ValueError:
+                continue
+            character = row[1].strip()
+            text = row[2].strip()
+            if not character or not text:
+                continue
+            lines.append(DialogueLine(
+                index=index,
+                character=character,
+                text=text,
+                char_count=len(text),
+            ))
+    return lines
+
+
 def parse_from_file(filepath: str) -> list[DialogueLine]:
-    """ファイルから読み込んでパース"""
+    """ファイルから読み込んでパース。拡張子が .csv なら CSV として処理。"""
+    if filepath.lower().endswith('.csv'):
+        return parse_from_csv(filepath)
     with open(filepath, 'r', encoding='utf-8') as f:
         return parse_dialogue(f.read())
 
