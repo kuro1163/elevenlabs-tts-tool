@@ -39,6 +39,25 @@ def get_elevenlabs_client():
     return ElevenLabs(api_key=api_key)
 
 
+def make_scrollable_frame(parent) -> tuple[tk.Canvas, ttk.Frame]:
+    """親フレーム内にスクロール可能なフレームを作成して返す"""
+    canvas = tk.Canvas(parent, highlightthickness=0)
+    scrollbar = ttk.Scrollbar(parent, orient=tk.VERTICAL, command=canvas.yview)
+    inner = ttk.Frame(canvas, padding="15")
+    inner.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+    canvas.create_window((0, 0), window=inner, anchor="nw", tags="inner")
+    canvas.configure(yscrollcommand=scrollbar.set)
+    # 幅を追従させる
+    canvas.bind("<Configure>", lambda e: canvas.itemconfig("inner", width=e.width))
+    scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+    canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+    # マウスホイール
+    def _on_mousewheel(event):
+        canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+    canvas.bind_all("<MouseWheel>", _on_mousewheel)
+    return canvas, inner
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # ボイスデザイン タブ
 # ══════════════════════════════════════════════════════════════════════════════
@@ -49,48 +68,58 @@ class VoiceDesignTab:
         self.previews: list[dict] = []
         self.selected_idx: int | None = None
 
-        frame = ttk.Frame(notebook, padding="15")
+        frame = ttk.Frame(notebook)
         notebook.add(frame, text="ボイスデザイン")
-        self._build(frame)
+        self._canvas, main = make_scrollable_frame(frame)
+        self._build(main)
 
     def _build(self, main):
         # ── ボイス説明 ──────────────────────────────────────────
         ttk.Label(main, text="ボイス説明（英語推奨）:").pack(anchor=tk.W)
         self.desc_text = tk.Text(main, height=4, wrap=tk.WORD)
         self.desc_text.pack(fill=tk.X, pady=(2, 8))
-        self.desc_text.insert('1.0',
-            'A young Japanese woman in her 20s with a bright, energetic voice. '
-            'Cheerful and friendly tone.'
-        )
+        self.desc_text.insert('1.0', '')
 
         # ── サンプルテキスト ────────────────────────────────────
         ttk.Label(main, text="サンプルテキスト（空欄で自動生成 / 100文字以上）:").pack(anchor=tk.W)
         self.sample_text = tk.Text(main, height=7, wrap=tk.WORD)
         self.sample_text.pack(fill=tk.X, pady=(2, 8))
+        self.sample_text.insert('1.0',
+            'こんにちは先生！今日はいい天気ですね！先生？その本は何ですか！！！'
+            '私は今日はシャーレの当番に来ました。よろしくお願いします！'
+            '赤字覚悟の大セールですよ～。見ていってください！'
+            'あれっ？先生どうかしましたか？変ですよ！'
+        )
 
         # ── プロンプト強度 ──────────────────────────────────────
         gs_row = ttk.Frame(main)
         gs_row.pack(fill=tk.X, pady=(0, 8))
         ttk.Label(gs_row, text="プロンプト強度:").pack(side=tk.LEFT)
-        self.guidance_var = tk.DoubleVar(value=0.5)
-        ttk.Scale(gs_row, from_=0.0, to=1.0, variable=self.guidance_var,
+        self.guidance_var = tk.DoubleVar(value=5.0)
+        ttk.Scale(gs_row, from_=0.0, to=15.0, variable=self.guidance_var,
                   orient=tk.HORIZONTAL, length=200).pack(side=tk.LEFT, padx=(8, 5))
-        self.guidance_label = ttk.Label(gs_row, text="0.50", width=5)
+        self.guidance_label = ttk.Label(gs_row, text="5.0", width=5)
         self.guidance_label.pack(side=tk.LEFT)
+        ttk.Label(gs_row, text="(低=自由 / 高=厳密)", foreground="gray").pack(side=tk.LEFT, padx=(5, 0))
         self.guidance_var.trace_add('write', lambda *_: self.guidance_label.config(
-            text=f"{self.guidance_var.get():.2f}"))
+            text=f"{self.guidance_var.get():.1f}"))
 
-        # ── プレビュー生成ボタン ────────────────────────────────
-        self.preview_btn = ttk.Button(main, text="プレビューを生成（3種）",
-                                      command=self.generate_previews, width=22)
-        self.preview_btn.pack(pady=(0, 10))
+        # ── 生成数 & プレビュー生成ボタン ─────────────────────────
+        gen_row = ttk.Frame(main)
+        gen_row.pack(fill=tk.X, pady=(0, 10))
+        self.gen_count_var = tk.IntVar(value=3)
+        ttk.Radiobutton(gen_row, text="3種", variable=self.gen_count_var, value=3).pack(side=tk.LEFT)
+        ttk.Radiobutton(gen_row, text="6種", variable=self.gen_count_var, value=6).pack(side=tk.LEFT, padx=(8, 0))
+        self.preview_btn = ttk.Button(gen_row, text="プレビューを生成",
+                                      command=self.generate_previews, width=18)
+        self.preview_btn.pack(side=tk.LEFT, padx=(15, 0))
 
         # ── プレビュー一覧 ──────────────────────────────────────
         preview_frame = ttk.LabelFrame(main, text="プレビュー", padding="8")
         preview_frame.pack(fill=tk.X, pady=(0, 10))
 
         self.preview_rows: list[dict] = []
-        for i in range(3):
+        for i in range(6):
             row = ttk.Frame(preview_frame)
             row.pack(fill=tk.X, pady=3)
             lbl = ttk.Label(row, text=f"#{i+1} ---", width=36, anchor=tk.W)
@@ -104,6 +133,9 @@ class VoiceDesignTab:
                                     state=tk.DISABLED)
             select_btn.pack(side=tk.LEFT)
             self.preview_rows.append({'label': lbl, 'play': play_btn, 'select': select_btn})
+            if i >= 3:
+                row.pack_forget()
+        self.gen_count_var.trace_add('write', self._on_gen_count_change)
 
         # ── 保存フォーム ────────────────────────────────────────
         save_frame = ttk.LabelFrame(main, text="ボイスを保存してconfig.jsonに登録", padding="8")
@@ -122,6 +154,15 @@ class VoiceDesignTab:
                                    command=self.save_voice, width=26, state=tk.DISABLED)
         self.save_btn.pack()
 
+    def _on_gen_count_change(self, *_):
+        count = self.gen_count_var.get()
+        for i, row_data in enumerate(self.preview_rows):
+            row_widget = row_data['label'].master
+            if i < count:
+                row_widget.pack(fill=tk.X, pady=3)
+            else:
+                row_widget.pack_forget()
+
     # ── プレビュー生成 ──────────────────────────────────────────
 
     def generate_previews(self):
@@ -129,18 +170,22 @@ class VoiceDesignTab:
         if not desc:
             messagebox.showerror("エラー", "ボイス説明を入力してください")
             return
+        if len(desc) > 1000:
+            messagebox.showerror("エラー", f"ボイス説明が長すぎます（{len(desc)}文字 / 上限1000文字）")
+            return
+        gen_count = self.gen_count_var.get()
         self.preview_btn.config(state=tk.DISABLED)
-        for row in self.preview_rows:
-            row['label'].config(text="生成中...")
-            row['play'].config(state=tk.DISABLED)
-            row['select'].config(state=tk.DISABLED)
+        for i in range(gen_count):
+            self.preview_rows[i]['label'].config(text="生成中...")
+            self.preview_rows[i]['play'].config(state=tk.DISABLED)
+            self.preview_rows[i]['select'].config(state=tk.DISABLED)
         self.previews.clear()
         self.selected_idx = None
         self.selected_label.config(text="選択中: なし")
         self.save_btn.config(state=tk.DISABLED)
-        threading.Thread(target=self._generate_thread, args=(desc,), daemon=True).start()
+        threading.Thread(target=self._generate_thread, args=(desc, gen_count), daemon=True).start()
 
-    def _generate_thread(self, desc: str):
+    def _generate_thread(self, desc: str, gen_count: int):
         try:
             import base64
             client = get_elevenlabs_client()
@@ -150,20 +195,26 @@ class VoiceDesignTab:
                 sample = None
             auto_gen = sample is None
 
-            self.log(f"プレビュー生成中...")
+            num_calls = (gen_count + 2) // 3  # 3→1回, 6→2回
+            self.log(f"プレビュー生成中...（{gen_count}種 / API {num_calls}回）")
             self.log(f"説明: {desc[:60]}{'...' if len(desc)>60 else ''}")
 
             guidance = self.guidance_var.get()
-            resp = client.text_to_voice.create_previews(
-                voice_description=desc,
-                text=sample if not auto_gen else None,
-                auto_generate_text=auto_gen,
-                guidance_scale=guidance,
-            )
-            previews_data = resp.previews if hasattr(resp, 'previews') else [resp]
+            all_previews = []
+            for call_idx in range(num_calls):
+                if call_idx > 0:
+                    self.log(f"追加生成中...（{call_idx+1}/{num_calls}回目）")
+                resp = client.text_to_voice.create_previews(
+                    voice_description=desc,
+                    text=sample if not auto_gen else None,
+                    auto_generate_text=auto_gen,
+                    guidance_scale=guidance,
+                )
+                previews_data = resp.previews if hasattr(resp, 'previews') else [resp]
+                all_previews.extend(previews_data[:3])
 
             self.previews.clear()
-            for i, preview in enumerate(previews_data[:3]):
+            for i, preview in enumerate(all_previews[:gen_count]):
                 audio_bytes = b""
                 if hasattr(preview, 'audio_base_64') and preview.audio_base_64:
                     try:
@@ -267,9 +318,10 @@ class VoiceRemixTab:
         self.previews: list[dict] = []
         self.selected_idx: int | None = None
 
-        frame = ttk.Frame(notebook, padding="15")
+        frame = ttk.Frame(notebook)
         notebook.add(frame, text="ボイスリミックス")
-        self._build(frame)
+        self._canvas, main = make_scrollable_frame(frame)
+        self._build(main)
 
     def _build(self, main):
         ttk.Label(main, text="既存ボイスをテキストプロンプトで変化させます",
@@ -292,10 +344,13 @@ class VoiceRemixTab:
         vrow.pack(fill=tk.X)
         self.voice_var = tk.StringVar()
         self.voice_combo = ttk.Combobox(vrow, textvariable=self.voice_var,
-                                        values=voice_names, state='readonly', width=18)
+                                        values=voice_names, state='readonly', width=24,
+                                        height=20)
         if voice_names:
             self.voice_combo.set(voice_names[0])
         self.voice_combo.pack(side=tk.LEFT)
+        ttk.Button(vrow, text="更新", width=5,
+                   command=self._refresh_voices).pack(side=tk.LEFT, padx=(5, 0))
         self.voice_id_label = ttk.Label(vrow, text="", foreground="gray")
         self.voice_id_label.pack(side=tk.LEFT, padx=(10, 0))
         self.voice_combo.bind('<<ComboboxSelected>>', self._on_voice_select)
@@ -305,36 +360,61 @@ class VoiceRemixTab:
         ttk.Label(main, text="変化の説明（英語推奨）:").pack(anchor=tk.W)
         self.desc_text = tk.Text(main, height=4, wrap=tk.WORD)
         self.desc_text.pack(fill=tk.X, pady=(2, 8))
-        self.desc_text.insert('1.0', 'Make this voice more elderly and tired.')
+        self.desc_text.insert('1.0', '')
 
         # ── サンプルテキスト ────────────────────────────────────
         ttk.Label(main, text="サンプルテキスト（空欄で自動生成 / 100文字以上）:").pack(anchor=tk.W)
         self.sample_text = tk.Text(main, height=5, wrap=tk.WORD)
         self.sample_text.pack(fill=tk.X, pady=(2, 8))
+        self.sample_text.insert('1.0',
+            'こんにちは先生！今日はいい天気ですね！先生？その本は何ですか！！！'
+            '私は今日はシャーレの当番に来ました。よろしくお願いします！'
+            '赤字覚悟の大セールですよ～。見ていってください！'
+            'あれっ？先生どうかしましたか？変ですよ！'
+        )
 
-        # ── プロンプト強度 ──────────────────────────────────────
+        # ── guidance_scale（プロンプト準拠度）─────────────────────
         gs_row = ttk.Frame(main)
         gs_row.pack(fill=tk.X, pady=(0, 8))
-        ttk.Label(gs_row, text="プロンプト強度:").pack(side=tk.LEFT)
-        self.guidance_var = tk.DoubleVar(value=0.5)
-        ttk.Scale(gs_row, from_=0.0, to=1.0, variable=self.guidance_var,
+        ttk.Label(gs_row, text="プロンプト準拠度:").pack(side=tk.LEFT)
+        self.guidance_var = tk.DoubleVar(value=5.0)
+        ttk.Scale(gs_row, from_=0.0, to=15.0, variable=self.guidance_var,
                   orient=tk.HORIZONTAL, length=200).pack(side=tk.LEFT, padx=(8, 5))
-        self.guidance_label = ttk.Label(gs_row, text="0.50", width=5)
+        self.guidance_label = ttk.Label(gs_row, text="5.0", width=5)
         self.guidance_label.pack(side=tk.LEFT)
+        ttk.Label(gs_row, text="(低=自由 / 高=厳密)", foreground="gray").pack(side=tk.LEFT, padx=(5, 0))
         self.guidance_var.trace_add('write', lambda *_: self.guidance_label.config(
-            text=f"{self.guidance_var.get():.2f}"))
+            text=f"{self.guidance_var.get():.1f}"))
 
-        # ── リミックス生成ボタン ────────────────────────────────
-        self.remix_btn = ttk.Button(main, text="リミックスを生成（3種）",
-                                    command=self.generate_remix, width=22)
-        self.remix_btn.pack(pady=(0, 10))
+        # ── prompt_strength（変化量）──────────────────────────────
+        ps_row = ttk.Frame(main)
+        ps_row.pack(fill=tk.X, pady=(0, 8))
+        ttk.Label(ps_row, text="変化量:").pack(side=tk.LEFT)
+        self.prompt_strength_var = tk.DoubleVar(value=0.5)
+        ttk.Scale(ps_row, from_=0.0, to=1.0, variable=self.prompt_strength_var,
+                  orient=tk.HORIZONTAL, length=200).pack(side=tk.LEFT, padx=(8, 5))
+        self.ps_label = ttk.Label(ps_row, text="0.50", width=5)
+        self.ps_label.pack(side=tk.LEFT)
+        ttk.Label(ps_row, text="(0=元の声維持 / 1=大きく変化)", foreground="gray").pack(side=tk.LEFT, padx=(5, 0))
+        self.prompt_strength_var.trace_add('write', lambda *_: self.ps_label.config(
+            text=f"{self.prompt_strength_var.get():.2f}"))
+
+        # ── 生成数 & リミックス生成ボタン ─────────────────────────
+        gen_row = ttk.Frame(main)
+        gen_row.pack(fill=tk.X, pady=(0, 10))
+        self.gen_count_var = tk.IntVar(value=3)
+        ttk.Radiobutton(gen_row, text="3種", variable=self.gen_count_var, value=3).pack(side=tk.LEFT)
+        ttk.Radiobutton(gen_row, text="6種", variable=self.gen_count_var, value=6).pack(side=tk.LEFT, padx=(8, 0))
+        self.remix_btn = ttk.Button(gen_row, text="リミックスを生成",
+                                    command=self.generate_remix, width=18)
+        self.remix_btn.pack(side=tk.LEFT, padx=(15, 0))
 
         # ── プレビュー一覧 ──────────────────────────────────────
         preview_frame = ttk.LabelFrame(main, text="プレビュー", padding="8")
         preview_frame.pack(fill=tk.X, pady=(0, 10))
 
         self.preview_rows: list[dict] = []
-        for i in range(3):
+        for i in range(6):
             row = ttk.Frame(preview_frame)
             row.pack(fill=tk.X, pady=3)
             lbl = ttk.Label(row, text=f"#{i+1} ---", width=36, anchor=tk.W)
@@ -348,6 +428,9 @@ class VoiceRemixTab:
                                     state=tk.DISABLED)
             select_btn.pack(side=tk.LEFT)
             self.preview_rows.append({'label': lbl, 'play': play_btn, 'select': select_btn})
+            if i >= 3:
+                row.pack_forget()
+        self.gen_count_var.trace_add('write', self._on_gen_count_change)
 
         # ── 保存フォーム ────────────────────────────────────────
         save_frame = ttk.LabelFrame(main, text="ボイスを保存してconfig.jsonに登録", padding="8")
@@ -366,6 +449,30 @@ class VoiceRemixTab:
                                    command=self.save_voice, width=26, state=tk.DISABLED)
         self.save_btn.pack()
 
+    def _on_gen_count_change(self, *_):
+        count = self.gen_count_var.get()
+        for i, row_data in enumerate(self.preview_rows):
+            row_widget = row_data['label'].master
+            if i < count:
+                row_widget.pack(fill=tk.X, pady=3)
+            else:
+                row_widget.pack_forget()
+
+    def _refresh_voices(self):
+        try:
+            config = load_config()
+            voices = config.get('character_voices', {})
+            voice_names = sorted(voices.keys())
+        except Exception:
+            voices = {}
+            voice_names = []
+        self._voice_map = voices
+        self.voice_combo['values'] = voice_names
+        if voice_names and self.voice_var.get() not in voice_names:
+            self.voice_combo.set(voice_names[0])
+        self._on_voice_select()
+        self.log(f"ベースボイスを更新しました（{len(voice_names)}件）")
+
     def _on_voice_select(self, event=None):
         name = self.voice_var.get()
         vid = self._voice_map.get(name, "")
@@ -382,25 +489,29 @@ class VoiceRemixTab:
         if not desc:
             messagebox.showerror("エラー", "変化の説明を入力してください")
             return
+        if len(desc) > 1000:
+            messagebox.showerror("エラー", f"変化の説明が長すぎます（{len(desc)}文字 / 上限1000文字）")
+            return
 
         voice_id = self._voice_map.get(voice_name, "")
         if not voice_id:
             messagebox.showerror("エラー", f"voice_id が見つかりません: {voice_name}")
             return
 
+        gen_count = self.gen_count_var.get()
         self.remix_btn.config(state=tk.DISABLED)
-        for row in self.preview_rows:
-            row['label'].config(text="生成中...")
-            row['play'].config(state=tk.DISABLED)
-            row['select'].config(state=tk.DISABLED)
+        for i in range(gen_count):
+            self.preview_rows[i]['label'].config(text="生成中...")
+            self.preview_rows[i]['play'].config(state=tk.DISABLED)
+            self.preview_rows[i]['select'].config(state=tk.DISABLED)
         self.previews.clear()
         self.selected_idx = None
         self.selected_label.config(text="選択中: なし")
         self.save_btn.config(state=tk.DISABLED)
 
-        threading.Thread(target=self._remix_thread, args=(voice_id, desc), daemon=True).start()
+        threading.Thread(target=self._remix_thread, args=(voice_id, desc, gen_count), daemon=True).start()
 
-    def _remix_thread(self, voice_id: str, desc: str):
+    def _remix_thread(self, voice_id: str, desc: str, gen_count: int):
         try:
             import base64
             client = get_elevenlabs_client()
@@ -410,21 +521,29 @@ class VoiceRemixTab:
                 sample = None
             auto_gen = sample is None
 
-            self.log(f"リミックス生成中...")
+            num_calls = (gen_count + 2) // 3
+            self.log(f"リミックス生成中...（{gen_count}種 / API {num_calls}回）")
             self.log(f"ベース: {self.voice_var.get()} / 説明: {desc[:50]}...")
 
             guidance = self.guidance_var.get()
-            resp = client.text_to_voice.remix(
-                voice_id=voice_id,
-                voice_description=desc,
-                text=sample if not auto_gen else None,
-                auto_generate_text=auto_gen,
-                guidance_scale=guidance,
-            )
-            previews_data = resp.previews if hasattr(resp, 'previews') else [resp]
+            prompt_strength = self.prompt_strength_var.get()
+            all_previews = []
+            for call_idx in range(num_calls):
+                if call_idx > 0:
+                    self.log(f"追加生成中...（{call_idx+1}/{num_calls}回目）")
+                resp = client.text_to_voice.remix(
+                    voice_id=voice_id,
+                    voice_description=desc,
+                    text=sample if not auto_gen else None,
+                    auto_generate_text=auto_gen,
+                    guidance_scale=guidance,
+                    prompt_strength=prompt_strength,
+                )
+                previews_data = resp.previews if hasattr(resp, 'previews') else [resp]
+                all_previews.extend(previews_data[:3])
 
             self.previews.clear()
-            for i, preview in enumerate(previews_data[:3]):
+            for i, preview in enumerate(all_previews[:gen_count]):
                 audio_bytes = b""
                 if hasattr(preview, 'audio_base_64') and preview.audio_base_64:
                     try:
@@ -530,7 +649,7 @@ class MainApp:
         paned.pack(fill=tk.BOTH, expand=True, padx=10, pady=(10, 10))
 
         tab_outer = ttk.Frame(paned)
-        paned.add(tab_outer, stretch="never")
+        paned.add(tab_outer, stretch="always")
 
         notebook = ttk.Notebook(tab_outer)
         notebook.pack(fill=tk.BOTH, expand=True)

@@ -254,16 +254,18 @@ def process_dialogues(
             })
             continue
         
-        # 前後のコンテキスト（同じキャラの場合のみ有効）
+        # 前後のコンテキスト
         # 注意: eleven_v3モデルはprevious_text/next_textに非対応
         previous_text = None
         next_text = None
-        
+
         if use_context and model_id != "eleven_v3":
-            if i > 0 and dialogues[i - 1].character == dialogue.character:
-                previous_text = dialogues[i - 1].text
-            if i < len(dialogues) - 1 and dialogues[i + 1].character == dialogue.character:
-                next_text = dialogues[i + 1].text
+            if i > 0:
+                prev = dialogues[i - 1]
+                previous_text = f"{prev.character}「{prev.text}」" if prev.character != dialogue.character else prev.text
+            if i < len(dialogues) - 1:
+                nxt = dialogues[i + 1]
+                next_text = f"{nxt.character}「{nxt.text}」" if nxt.character != dialogue.character else nxt.text
         
         try:
             print(f"[{dialogue.index:03d}] Generating: {dialogue.character} ({dialogue.char_count}字)...")
