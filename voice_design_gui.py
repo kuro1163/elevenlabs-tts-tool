@@ -5,38 +5,22 @@ ElevenLabs ボイスデザイン & ボイスリミックスツール - GUI版
 
 import json
 import os
+import random
 import sys
 import tempfile
 import threading
 import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext, filedialog
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+if getattr(sys, 'frozen', False):
+    BASE_DIR = os.path.dirname(sys.executable)
+else:
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 os.chdir(BASE_DIR)
 if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
 
-
-def load_config() -> dict:
-    config_path = os.path.join(BASE_DIR, 'config.json')
-    with open(config_path, 'r', encoding='utf-8') as f:
-        return json.load(f)
-
-
-def save_config(config: dict):
-    config_path = os.path.join(BASE_DIR, 'config.json')
-    with open(config_path, 'w', encoding='utf-8') as f:
-        json.dump(config, f, ensure_ascii=False, indent=4)
-
-
-def get_elevenlabs_client():
-    from dotenv import load_dotenv
-    from elevenlabs.client import ElevenLabs
-    load_dotenv(os.path.join(BASE_DIR, '.env'))
-    api_key = os.getenv("ELEVENLABS_API_KEY")
-    if not api_key:
-        raise RuntimeError("ELEVENLABS_API_KEY が .env に設定されていません")
-    return ElevenLabs(api_key=api_key)
+from utils import load_config, save_config, get_client as get_elevenlabs_client
 
 
 def make_scrollable_frame(parent) -> tuple[tk.Canvas, ttk.Frame]:
@@ -95,10 +79,10 @@ class VoiceDesignTab:
         gs_row = ttk.Frame(main)
         gs_row.pack(fill=tk.X, pady=(0, 8))
         ttk.Label(gs_row, text="プロンプト強度:").pack(side=tk.LEFT)
-        self.guidance_var = tk.DoubleVar(value=5.0)
+        self.guidance_var = tk.DoubleVar(value=2.0)
         ttk.Scale(gs_row, from_=0.0, to=15.0, variable=self.guidance_var,
                   orient=tk.HORIZONTAL, length=200).pack(side=tk.LEFT, padx=(8, 5))
-        self.guidance_label = ttk.Label(gs_row, text="5.0", width=5)
+        self.guidance_label = ttk.Label(gs_row, text="2.0", width=5)
         self.guidance_label.pack(side=tk.LEFT)
         ttk.Label(gs_row, text="(低=自由 / 高=厳密)", foreground="gray").pack(side=tk.LEFT, padx=(5, 0))
         self.guidance_var.trace_add('write', lambda *_: self.guidance_label.config(
@@ -195,23 +179,27 @@ class VoiceDesignTab:
                 sample = None
             auto_gen = sample is None
 
-            num_calls = (gen_count + 2) // 3  # 3→1回, 6→2回
-            self.log(f"プレビュー生成中...（{gen_count}種 / API {num_calls}回）")
+            # 6種: 各回で説明文にユニークIDを付けて1つずつ取る（確実に全部違う声）
+            self.log(f"プレビュー生成中...（{gen_count}種 / API {gen_count}回）")
             self.log(f"説明: {desc[:60]}{'...' if len(desc)>60 else ''}")
 
             guidance = self.guidance_var.get()
             all_previews = []
-            for call_idx in range(num_calls):
+            for call_idx in range(gen_count):
                 if call_idx > 0:
-                    self.log(f"追加生成中...（{call_idx+1}/{num_calls}回目）")
+                    self.log(f"生成中...（{call_idx+1}/{gen_count}）")
+                # 毎回異なるseedで確実に違う声を生成
+                seed = random.randint(0, 2147483647)
                 resp = client.text_to_voice.create_previews(
                     voice_description=desc,
                     text=sample if not auto_gen else None,
                     auto_generate_text=auto_gen,
                     guidance_scale=guidance,
+                    seed=seed,
                 )
                 previews_data = resp.previews if hasattr(resp, 'previews') else [resp]
-                all_previews.extend(previews_data[:3])
+                if previews_data:
+                    all_previews.append(previews_data[0])
 
             self.previews.clear()
             for i, preview in enumerate(all_previews[:gen_count]):
@@ -377,10 +365,10 @@ class VoiceRemixTab:
         gs_row = ttk.Frame(main)
         gs_row.pack(fill=tk.X, pady=(0, 8))
         ttk.Label(gs_row, text="プロンプト準拠度:").pack(side=tk.LEFT)
-        self.guidance_var = tk.DoubleVar(value=5.0)
+        self.guidance_var = tk.DoubleVar(value=2.0)
         ttk.Scale(gs_row, from_=0.0, to=15.0, variable=self.guidance_var,
                   orient=tk.HORIZONTAL, length=200).pack(side=tk.LEFT, padx=(8, 5))
-        self.guidance_label = ttk.Label(gs_row, text="5.0", width=5)
+        self.guidance_label = ttk.Label(gs_row, text="2.0", width=5)
         self.guidance_label.pack(side=tk.LEFT)
         ttk.Label(gs_row, text="(低=自由 / 高=厳密)", foreground="gray").pack(side=tk.LEFT, padx=(5, 0))
         self.guidance_var.trace_add('write', lambda *_: self.guidance_label.config(
@@ -521,16 +509,17 @@ class VoiceRemixTab:
                 sample = None
             auto_gen = sample is None
 
-            num_calls = (gen_count + 2) // 3
-            self.log(f"リミックス生成中...（{gen_count}種 / API {num_calls}回）")
+            # 各回で説明文にユニークIDを付けて1つずつ取る（確実に全部違う声）
+            self.log(f"リミックス生成中...（{gen_count}種 / API {gen_count}回）")
             self.log(f"ベース: {self.voice_var.get()} / 説明: {desc[:50]}...")
 
             guidance = self.guidance_var.get()
             prompt_strength = self.prompt_strength_var.get()
             all_previews = []
-            for call_idx in range(num_calls):
+            for call_idx in range(gen_count):
                 if call_idx > 0:
-                    self.log(f"追加生成中...（{call_idx+1}/{num_calls}回目）")
+                    self.log(f"生成中...（{call_idx+1}/{gen_count}）")
+                seed = random.randint(0, 2147483647)
                 resp = client.text_to_voice.remix(
                     voice_id=voice_id,
                     voice_description=desc,
@@ -538,9 +527,11 @@ class VoiceRemixTab:
                     auto_generate_text=auto_gen,
                     guidance_scale=guidance,
                     prompt_strength=prompt_strength,
+                    seed=seed,
                 )
                 previews_data = resp.previews if hasattr(resp, 'previews') else [resp]
-                all_previews.extend(previews_data[:3])
+                if previews_data:
+                    all_previews.append(previews_data[0])
 
             self.previews.clear()
             for i, preview in enumerate(all_previews[:gen_count]):

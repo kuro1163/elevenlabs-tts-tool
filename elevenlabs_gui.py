@@ -24,77 +24,12 @@ os.chdir(BASE_DIR)
 if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
 
+from utils import load_config, read_csv_rows, check_csv_alignment
+
 # csv_split_tool の除外キャラリスト
 EXCLUDE_NAMES = ['霊夢', '魔理沙', 'ブルアカ霊夢', 'ブルアカ魔理沙', '場面転換', 'アイキャッチ']
 
 
-def read_csv_rows(filepath: str) -> list[dict]:
-    """CSVを読んで [{serial, character, text}, ...] を返す。"""
-    rows = []
-    with open(filepath, 'r', encoding='utf-8-sig', newline='') as f:
-        reader = csv.reader(f)
-        next(reader, None)  # ヘッダースキップ
-        for row in reader:
-            if len(row) < 3:
-                continue
-            try:
-                serial = int(row[0])
-            except ValueError:
-                continue
-            rows.append({
-                'serial': serial,
-                'character': row[1].strip(),
-                'text': row[2].strip(),
-            })
-    return rows
-
-
-def check_csv_alignment(split_path: str, elevenlabs_path: str) -> list[str]:
-    """_split.csv と _elevenlabs.csv の整合性をチェックし、結果メッセージのリストを返す。"""
-    split_rows = read_csv_rows(split_path)
-    el_rows = read_csv_rows(elevenlabs_path)
-
-    messages = []
-    messages.append(f"台本CSV（split）: {len(split_rows)}行")
-    messages.append(f"ボイスCSV（elevenlabs）: {len(el_rows)}行")
-
-    if len(split_rows) != len(el_rows):
-        messages.append(f"⚠ 行数が一致しません！ (差: {abs(len(split_rows) - len(el_rows))}行)")
-
-    mismatches = []
-    max_rows = min(len(split_rows), len(el_rows))
-    for i in range(max_rows):
-        s = split_rows[i]
-        e = el_rows[i]
-        problems = []
-        if s['serial'] != e['serial']:
-            problems.append(f"連番: {s['serial']}→{e['serial']}")
-        if s['character'] != e['character']:
-            problems.append(f"キャラ: {s['character']}→{e['character']}")
-        if problems:
-            mismatches.append(f"  行{i+1}: {', '.join(problems)}")
-
-    if mismatches:
-        messages.append(f"⚠ {len(mismatches)}件の不一致:")
-        messages.extend(mismatches[:20])
-        if len(mismatches) > 20:
-            messages.append(f"  ...他 {len(mismatches) - 20}件")
-    else:
-        if len(split_rows) == len(el_rows):
-            messages.append("✓ 整合性OK: 連番・キャラ名すべて一致")
-        else:
-            messages.append("✓ 共通範囲の連番・キャラ名は一致（行数差あり）")
-
-    return messages
-
-
-
-def load_config() -> dict:
-    config_path = os.path.join(BASE_DIR, 'config.json')
-    if os.path.exists(config_path):
-        with open(config_path, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    return {}
 
 
 def split_csv(input_path: str) -> tuple[list[list], int, int]:
@@ -365,7 +300,7 @@ class ElevenLabsGUI:
             from elevenlabs.client import ElevenLabs
             from generate import (
                 process_dialogues, fetch_available_voices,
-                check_missing_voices, load_config as gen_load_config,
+                check_missing_voices,
             )
             from parser import parse_from_file
 
@@ -378,7 +313,7 @@ class ElevenLabsGUI:
                     "エラー", ".env に ELEVENLABS_API_KEY を設定してください"))
                 return
 
-            config = gen_load_config(os.path.join(BASE_DIR, 'config.json'))
+            config = load_config(os.path.join(BASE_DIR, 'config.json'))
             client = ElevenLabs(api_key=api_key)
 
             self._thread_safe_log(f"台本: {script_path}")
@@ -558,7 +493,7 @@ class ElevenLabsGUI:
                 "Claude変換後のCSVをSTEP 2に設定してからチェックしてください。")
             return
 
-        results = check_csv_alignment(split_path, elevenlabs_path)
+        _ok, results = check_csv_alignment(split_path, elevenlabs_path)
 
         self.log("\n--- 整合性チェック ---")
         self.log(f"比較元: {os.path.basename(split_path)}")

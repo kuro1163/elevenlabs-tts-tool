@@ -13,8 +13,10 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from elevenlabs.client import ElevenLabs
+from elevenlabs.types import PronunciationDictionaryVersionLocator
 
 from parser import parse_dialogue, DialogueLine
+from utils import load_config
 
 # 無音ファイルのパス（スクリプトと同じディレクトリに配置）
 SILENCE_FILE = os.path.join(os.path.dirname(__file__), "silence_2sec.mp3")
@@ -34,11 +36,6 @@ def sanitize_filename(text: str, max_length: int = 200) -> str:
         sanitized = sanitized[:max_length]
     return sanitized
 
-
-def load_config(config_path: str = "config.json") -> dict:
-    """設定ファイルを読み込む"""
-    with open(config_path, 'r', encoding='utf-8') as f:
-        return json.load(f)
 
 
 def get_voice_id(character: str, config: dict) -> str | None:
@@ -123,6 +120,21 @@ def prompt_add_missing_voices(missing: list, config: dict, config_path: str = "c
     return True
 
 
+def load_pronunciation_dict(config: dict) -> list[PronunciationDictionaryVersionLocator] | None:
+    """config.json から発音辞書ロケータを読み込む"""
+    pd = config.get("pronunciation_dictionary", {})
+    dict_id = pd.get("id")
+    version_id = pd.get("version_id")
+    if dict_id and version_id:
+        return [
+            PronunciationDictionaryVersionLocator(
+                pronunciation_dictionary_id=dict_id,
+                version_id=version_id,
+            )
+        ]
+    return None
+
+
 def generate_audio(
     client: ElevenLabs,
     text: str,
@@ -132,6 +144,7 @@ def generate_audio(
     language_code: str = "ja",
     previous_text: str | None = None,
     next_text: str | None = None,
+    pronunciation_dictionary_locators: list[PronunciationDictionaryVersionLocator] | None = None,
 ) -> bytes:
     """ElevenLabs APIで音声を生成"""
     kwargs = {
@@ -141,19 +154,24 @@ def generate_audio(
         "output_format": output_format,
         "language_code": language_code,
     }
-    
+    # eleven_v3ではapply_language_text_normalization非対応
+    if model_id != "eleven_v3":
+        kwargs["apply_language_text_normalization"] = True
+
     if previous_text:
         kwargs["previous_text"] = previous_text
     if next_text:
         kwargs["next_text"] = next_text
-    
+    if pronunciation_dictionary_locators:
+        kwargs["pronunciation_dictionary_locators"] = pronunciation_dictionary_locators
+
     audio = client.text_to_speech.convert(**kwargs)
-    
+
     # ストリームをバイトに変換
     audio_bytes = b""
     for chunk in audio:
         audio_bytes += chunk
-    
+
     return audio_bytes
 
 
@@ -210,10 +228,15 @@ def process_dialogues(
     results = []
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
-    
+
     model_id = config.get("default_model", "eleven_v3")
     output_format = config.get("default_output_format", "mp3_44100_128")
     language_code = config.get("language_code", "ja")
+
+    # 発音辞書
+    pd_locators = load_pronunciation_dict(config)
+    if pd_locators:
+        print("発音辞書を適用します")
     
     for i, dialogue in enumerate(dialogues):
         # ファイル名: 1_キャラ名_セリフ内容.mp3
@@ -279,6 +302,7 @@ def process_dialogues(
                 language_code=language_code,
                 previous_text=previous_text,
                 next_text=next_text,
+                pronunciation_dictionary_locators=pd_locators,
             )
             
             save_audio(audio_bytes, str(filepath))
