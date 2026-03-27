@@ -10,6 +10,7 @@ import sys
 import tempfile
 import threading
 import tkinter as tk
+from datetime import datetime
 from tkinter import ttk, messagebox, scrolledtext, filedialog
 
 if getattr(sys, 'frozen', False):
@@ -21,6 +22,15 @@ if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
 
 from utils import load_config, save_config, get_client as get_elevenlabs_client
+
+VOICE_LOG_PATH = os.path.join(BASE_DIR, "voice_design_log.jsonl")
+
+
+def append_voice_log(entry: dict):
+    """ボイスデザイン/リミックスの操作ログをJSONLファイルに追記"""
+    entry["timestamp"] = datetime.now().isoformat()
+    with open(VOICE_LOG_PATH, "a", encoding="utf-8") as f:
+        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
 
 def make_scrollable_frame(parent) -> tuple[tk.Canvas, ttk.Frame]:
@@ -261,6 +271,15 @@ class VoiceDesignTab:
         if self.selected_idx is None:
             messagebox.showerror("エラー", "プレビューを選択してください")
             return
+        config = load_config()
+        if char_name in config.get('character_voices', {}):
+            old_id = config['character_voices'][char_name]
+            if not messagebox.askyesno(
+                "上書き確認",
+                f'"{char_name}" は既に登録されています。\n\n'
+                f'既存voice_id: {old_id}\n\n'
+                f'上書きしますか？'):
+                return
         self.save_btn.config(state=tk.DISABLED)
         desc = self.desc_text.get('1.0', tk.END).strip()
         vid = self.previews[self.selected_idx]['generated_voice_id']
@@ -281,6 +300,14 @@ class VoiceDesignTab:
             config['character_voices'][char_name] = voice_id
             save_config(config)
             self.log(f'config.json に登録: "{char_name}" → {voice_id}')
+            append_voice_log({
+                "type": "design",
+                "char_name": char_name,
+                "voice_id": voice_id,
+                "generated_voice_id": generated_voice_id,
+                "prompt": desc,
+                "guidance_scale": self.guidance_var.get(),
+            })
             messagebox.showinfo("登録完了", f'"{char_name}" を登録しました\n\nvoice_id: {voice_id}')
             self.char_name_var.set('')
         except Exception as e:
@@ -593,6 +620,15 @@ class VoiceRemixTab:
         if self.selected_idx is None:
             messagebox.showerror("エラー", "プレビューを選択してください")
             return
+        config = load_config()
+        if char_name in config.get('character_voices', {}):
+            old_id = config['character_voices'][char_name]
+            if not messagebox.askyesno(
+                "上書き確認",
+                f'"{char_name}" は既に登録されています。\n\n'
+                f'既存voice_id: {old_id}\n\n'
+                f'上書きしますか？'):
+                return
         self.save_btn.config(state=tk.DISABLED)
         desc = self.desc_text.get('1.0', tk.END).strip()
         vid = self.previews[self.selected_idx]['generated_voice_id']
@@ -613,6 +649,17 @@ class VoiceRemixTab:
             config['character_voices'][char_name] = voice_id
             save_config(config)
             self.log(f'config.json に登録: "{char_name}" → {voice_id}')
+            append_voice_log({
+                "type": "remix",
+                "char_name": char_name,
+                "voice_id": voice_id,
+                "generated_voice_id": generated_voice_id,
+                "base_voice": self.voice_var.get(),
+                "base_voice_id": self._voice_map.get(self.voice_var.get(), ""),
+                "prompt": desc,
+                "guidance_scale": self.guidance_var.get(),
+                "prompt_strength": self.prompt_strength_var.get(),
+            })
             messagebox.showinfo("登録完了", f'"{char_name}" を登録しました\n\nvoice_id: {voice_id}')
             self.char_name_var.set('')
         except Exception as e:
