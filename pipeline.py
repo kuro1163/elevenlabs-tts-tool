@@ -259,7 +259,7 @@ def generate_ymm4(
         default_volume=default_volume,
         enable_tachie=True,
         character_mapping=character_mapping,
-        script_csv_path=elevenlabs_csv_path or split_csv_path,
+        script_csv_path=split_csv_path,
         narration_csv_path=split_csv_path,
         voice_layer=voice_layer,
     )
