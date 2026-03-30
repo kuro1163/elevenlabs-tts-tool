@@ -271,21 +271,22 @@ class VoiceDesignTab:
         if self.selected_idx is None:
             messagebox.showerror("エラー", "プレビューを選択してください")
             return
+        old_voice_id = None
         config = load_config()
         if char_name in config.get('character_voices', {}):
-            old_id = config['character_voices'][char_name]
+            old_voice_id = config['character_voices'][char_name]
             if not messagebox.askyesno(
                 "上書き確認",
                 f'"{char_name}" は既に登録されています。\n\n'
-                f'既存voice_id: {old_id}\n\n'
-                f'上書きしますか？'):
+                f'既存voice_id: {old_voice_id}\n\n'
+                f'上書きしますか？\n（ElevenLabs側の旧ボイスも削除されます）'):
                 return
         self.save_btn.config(state=tk.DISABLED)
         desc = self.desc_text.get('1.0', tk.END).strip()
         vid = self.previews[self.selected_idx]['generated_voice_id']
-        threading.Thread(target=self._save_thread, args=(char_name, desc, vid), daemon=True).start()
+        threading.Thread(target=self._save_thread, args=(char_name, desc, vid, old_voice_id), daemon=True).start()
 
-    def _save_thread(self, char_name: str, desc: str, generated_voice_id: str):
+    def _save_thread(self, char_name: str, desc: str, generated_voice_id: str, old_voice_id: str | None = None):
         try:
             client = get_elevenlabs_client()
             self.log(f'ElevenLabsに保存中: "{char_name}"...')
@@ -296,6 +297,13 @@ class VoiceDesignTab:
             )
             voice_id = voice.voice_id
             self.log(f"保存完了: voice_id = {voice_id}")
+            # 旧ボイスをElevenLabsから削除
+            if old_voice_id and old_voice_id != voice_id:
+                try:
+                    client.voices.delete(voice_id=old_voice_id)
+                    self.log(f"旧ボイス削除: {old_voice_id}")
+                except Exception as del_e:
+                    self.log(f"旧ボイス削除失敗（無視）: {del_e}")
             config = load_config()
             config['character_voices'][char_name] = voice_id
             save_config(config)
@@ -307,6 +315,7 @@ class VoiceDesignTab:
                 "generated_voice_id": generated_voice_id,
                 "prompt": desc,
                 "guidance_scale": self.guidance_var.get(),
+                "old_voice_id_deleted": old_voice_id,
             })
             messagebox.showinfo("登録完了", f'"{char_name}" を登録しました\n\nvoice_id: {voice_id}')
             self.char_name_var.set('')
@@ -360,7 +369,7 @@ class VoiceRemixTab:
         self.voice_var = tk.StringVar()
         self.voice_combo = ttk.Combobox(vrow, textvariable=self.voice_var,
                                         values=voice_names, state='readonly', width=24,
-                                        height=20)
+                                        height=40)
         if voice_names:
             self.voice_combo.set(voice_names[0])
         self.voice_combo.pack(side=tk.LEFT)
@@ -620,21 +629,22 @@ class VoiceRemixTab:
         if self.selected_idx is None:
             messagebox.showerror("エラー", "プレビューを選択してください")
             return
+        old_voice_id = None
         config = load_config()
         if char_name in config.get('character_voices', {}):
-            old_id = config['character_voices'][char_name]
+            old_voice_id = config['character_voices'][char_name]
             if not messagebox.askyesno(
                 "上書き確認",
                 f'"{char_name}" は既に登録されています。\n\n'
-                f'既存voice_id: {old_id}\n\n'
-                f'上書きしますか？'):
+                f'既存voice_id: {old_voice_id}\n\n'
+                f'上書きしますか？\n（ElevenLabs側の旧ボイスも削除されます）'):
                 return
         self.save_btn.config(state=tk.DISABLED)
         desc = self.desc_text.get('1.0', tk.END).strip()
         vid = self.previews[self.selected_idx]['generated_voice_id']
-        threading.Thread(target=self._save_thread, args=(char_name, desc, vid), daemon=True).start()
+        threading.Thread(target=self._save_thread, args=(char_name, desc, vid, old_voice_id), daemon=True).start()
 
-    def _save_thread(self, char_name: str, desc: str, generated_voice_id: str):
+    def _save_thread(self, char_name: str, desc: str, generated_voice_id: str, old_voice_id: str | None = None):
         try:
             client = get_elevenlabs_client()
             self.log(f'ElevenLabsに保存中: "{char_name}"...')
@@ -645,6 +655,13 @@ class VoiceRemixTab:
             )
             voice_id = voice.voice_id
             self.log(f"保存完了: voice_id = {voice_id}")
+            # 旧ボイスをElevenLabsから削除
+            if old_voice_id and old_voice_id != voice_id:
+                try:
+                    client.voices.delete(voice_id=old_voice_id)
+                    self.log(f"旧ボイス削除: {old_voice_id}")
+                except Exception as del_e:
+                    self.log(f"旧ボイス削除失敗（無視）: {del_e}")
             config = load_config()
             config['character_voices'][char_name] = voice_id
             save_config(config)
@@ -659,6 +676,7 @@ class VoiceRemixTab:
                 "prompt": desc,
                 "guidance_scale": self.guidance_var.get(),
                 "prompt_strength": self.prompt_strength_var.get(),
+                "old_voice_id_deleted": old_voice_id,
             })
             messagebox.showinfo("登録完了", f'"{char_name}" を登録しました\n\nvoice_id: {voice_id}')
             self.char_name_var.set('')
