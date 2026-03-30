@@ -73,10 +73,12 @@ def detect_name_normalizations(input_path):
                 continue
             char_name = row[0].strip()
 
-            # 改行で複数キャラの場合、それぞれチェック
+            # 改行または「・」で複数キャラの場合、それぞれチェック
             names = [char_name]
             if '\n' in char_name:
                 names = [c.strip() for c in char_name.split('\n') if c.strip()]
+            elif '・' in char_name:
+                names = [c.strip() for c in char_name.split('・') if c.strip()]
 
             for name in names:
                 if name in EXCLUDE_NAMES:
@@ -116,9 +118,12 @@ def split_multi_character_rows(input_path, apply_normalization=True):
 
             char_name = row[0].strip()
 
-            # A列に改行が含まれているか確認（複数キャラ分割）
-            if '\n' in char_name:
-                characters = [c.strip() for c in char_name.split('\n') if c.strip()]
+            # A列に改行または「・」が含まれているか確認（複数キャラ分割）
+            if '\n' in char_name or '・' in char_name:
+                if '\n' in char_name:
+                    characters = [c.strip() for c in char_name.split('\n') if c.strip()]
+                else:
+                    characters = [c.strip() for c in char_name.split('・') if c.strip()]
 
                 if len(characters) > 1:
                     serif = row[1] if len(row) > 1 else ''
