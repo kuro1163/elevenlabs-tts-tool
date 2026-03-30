@@ -16,10 +16,13 @@ from elevenlabs.client import ElevenLabs
 from elevenlabs.types import PronunciationDictionaryVersionLocator
 
 from core.parser import parse_dialogue, DialogueLine
-from core.config import load_config
+from core.config import load_config, BASE_DIR
 
-# 無音ファイルのパス（スクリプトと同じディレクトリに配置）
-SILENCE_FILE = os.path.join(os.path.dirname(__file__), "silence_2sec.mp3")
+# 無音ファイルのパス（data/ フォルダ内）
+SILENCE_FILE = os.path.join(BASE_DIR, "data", "silence_2sec.mp3")
+# フォールバック: ルート直下
+if not os.path.exists(SILENCE_FILE):
+    SILENCE_FILE = os.path.join(BASE_DIR, "silence_2sec.mp3")
 # 無音判定用のキーワード
 SILENCE_KEYWORDS = ["（無音）"]
 # 壊れたファイルと判定するサイズ閾値（バイト）

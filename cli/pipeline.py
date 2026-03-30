@@ -17,8 +17,11 @@ from pathlib import Path
 from dotenv import load_dotenv
 from elevenlabs.client import ElevenLabs
 
-# プロジェクトルートをパスに追加
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# プロジェクトルートをパスに追加（cli/ の1つ上）
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
 from core.config import load_config
 from core.csv_io import read_csv_rows, check_csv_alignment
 from core.client import get_client
@@ -36,7 +39,9 @@ from core.generator import (
 from core.parser import DialogueLine
 
 # ymm4-tools のモジュールをインポート
-YMMP4_TOOLS_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'ymm4-tools')
+YMMP4_TOOLS_DIR = os.path.join(os.path.dirname(PROJECT_ROOT), 'ymm4-tools')
+if not os.path.exists(YMMP4_TOOLS_DIR):
+    YMMP4_TOOLS_DIR = os.path.join(PROJECT_ROOT, '..', 'ymm4-tools')
 sys.path.insert(0, YMMP4_TOOLS_DIR)
 from ymm4_generate import generate_ymmp, verify_telop_vs_csv, print_telop_verification
 

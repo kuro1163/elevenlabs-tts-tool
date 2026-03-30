@@ -1,9 +1,6 @@
-"""互換ラッパー: core パッケージへの橋渡し"""
-import sys
-import os
-
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
+"""
+core パッケージ: ビジネスロジック（GUI非依存）
+"""
 from core.config import BASE_DIR, load_config, save_config
 from core.client import get_client
 from core.csv_io import read_csv_rows, check_csv_alignment

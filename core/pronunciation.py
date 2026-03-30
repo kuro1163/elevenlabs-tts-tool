@@ -20,11 +20,8 @@ import sys
 from dotenv import load_dotenv
 from elevenlabs.client import ElevenLabs
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from core.config import load_config, save_config
+from core.config import load_config, save_config, BASE_DIR
 from core.client import get_client
-
-BASE_DIR = os.path.dirname(__file__)
 
 # 一律置換で安全な初期ルール（文脈依存しないもの）
 INITIAL_RULES = [

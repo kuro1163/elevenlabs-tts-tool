@@ -8,3 +8,6 @@ __pycache__/
 *.spec
 build/
 dist/
+voice_design_log.jsonl
+voice_check_result.txt
+*.wav
