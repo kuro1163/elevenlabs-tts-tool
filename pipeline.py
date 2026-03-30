@@ -270,6 +270,46 @@ def generate_ymm4(
     return output_path
 
 
+def check_tachie_paths(ymmp_path: str, check_type: str = "テンプレート") -> list:
+    """ymmpファイル内の立ち絵パスが実際に存在するかチェック
+
+    Args:
+        ymmp_path: ymmpファイルのパス
+        check_type: 表示用ラベル（"テンプレート" or "生成ymmp"）
+
+    Returns:
+        不正パスのリスト [(キャラ名, フィールド名, パス), ...]
+    """
+    with open(ymmp_path, 'r', encoding='utf-8-sig') as f:
+        data = json.load(f)
+
+    issues = []
+    for c in data.get('Characters', []):
+        name = c.get('Name', '')
+        char_param = c.get('TachieCharacterParameter') or {}
+        item_param = c.get('TachieDefaultItemParameter') or {}
+
+        directory = char_param.get('Directory', '')
+        default_face = item_param.get('DefaultFace', '')
+
+        if directory and not os.path.exists(directory):
+            issues.append((name, 'Directory', directory))
+        if default_face and not os.path.exists(default_face):
+            issues.append((name, 'DefaultFace', default_face))
+
+    return issues
+
+
+def print_tachie_check(issues: list, check_type: str = "テンプレート"):
+    """立ち絵パスチェック結果を表示"""
+    if not issues:
+        print(f"  ✓ {check_type}の立ち絵パス: 全て正常")
+    else:
+        print(f"  ⚠ {check_type}の立ち絵パスに問題あり: {len(issues)}件")
+        for name, field, path in issues:
+            print(f"    ✗ {name} ({field}): {path}")
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # メイン パイプライン
 # ══════════════════════════════════════════════════════════════════════════════
@@ -393,6 +433,14 @@ def run_pipeline(
     if skip_ymm4:
         print("(--skip-ymm4: YMM4生成をスキップ)")
     else:
+        # ── STEP 3.5: テンプレート立ち絵パスチェック ──
+        ymm4_config = config.get('ymm4', {})
+        template_path = ymm4_config.get('template_path', '')
+        if template_path and os.path.exists(template_path):
+            tpl_issues = check_tachie_paths(template_path, "テンプレート")
+            print_tachie_check(tpl_issues, "テンプレート")
+            print()
+
         # ── STEP 4: YMM4生成 ──
         print("─" * 40)
         print("STEP 4: YMM4生成")
@@ -432,6 +480,11 @@ def run_pipeline(
             if item.get('$type', '').startswith('YukkuriMovieMaker.Project.Items.VoiceItem')
         )
         print_telop_verification(mismatches, voice_count)
+        print()
+
+        # ── STEP 5.5: 生成ymmp立ち絵パスチェック ──
+        ymmp_issues = check_tachie_paths(ymmp_path, "生成ymmp")
+        print_tachie_check(ymmp_issues, "生成ymmp")
         print()
 
     # ── STEP 6: 音声長チェック ──
