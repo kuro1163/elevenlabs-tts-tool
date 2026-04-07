@@ -369,7 +369,7 @@ class VoiceRemixTab:
         self.voice_var = tk.StringVar()
         self.voice_combo = ttk.Combobox(vrow, textvariable=self.voice_var,
                                         values=voice_names, state='readonly', width=24,
-                                        height=40)
+                                        height=8)
         if voice_names:
             self.voice_combo.set(voice_names[0])
         self.voice_combo.pack(side=tk.LEFT)
@@ -690,6 +690,220 @@ class VoiceRemixTab:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# 履歴 タブ
+# ══════════════════════════════════════════════════════════════════════════════
+
+class VoiceHistoryTab:
+    MAX_ENTRIES = 100
+
+    def __init__(self, notebook: ttk.Notebook, log_func, design_tab: VoiceDesignTab, remix_tab: VoiceRemixTab):
+        self.log = log_func
+        self.notebook = notebook
+        self.design_tab = design_tab
+        self.remix_tab = remix_tab
+        self.entries: list[dict] = []
+        self.selected_entry: dict | None = None
+
+        frame = ttk.Frame(notebook)
+        notebook.add(frame, text="履歴")
+        self._build(frame)
+        self._load_history()
+
+    def _build(self, parent: ttk.Frame):
+        # 上部: 更新ボタン + 件数
+        top = ttk.Frame(parent)
+        top.pack(fill=tk.X, padx=10, pady=(10, 5))
+        ttk.Button(top, text="更新", command=self._load_history).pack(side=tk.LEFT)
+        self.count_label = ttk.Label(top, text="")
+        self.count_label.pack(side=tk.LEFT, padx=10)
+
+        # メイン: 左=リスト、右=詳細
+        paned = tk.PanedWindow(parent, orient=tk.HORIZONTAL, sashrelief=tk.RAISED, sashwidth=4)
+        paned.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
+
+        # リスト部分（Treeview）
+        list_frame = ttk.Frame(paned)
+        paned.add(list_frame, stretch="always")
+
+        cols = ("timestamp", "type", "char_name", "prompt")
+        self.tree = ttk.Treeview(list_frame, columns=cols, show="headings", height=20)
+        self.tree.heading("timestamp", text="日時")
+        self.tree.heading("type", text="種別")
+        self.tree.heading("char_name", text="キャラ名")
+        self.tree.heading("prompt", text="プロンプト")
+        self.tree.column("timestamp", width=120, minwidth=100)
+        self.tree.column("type", width=70, minwidth=60)
+        self.tree.column("char_name", width=80, minwidth=60)
+        self.tree.column("prompt", width=200, minwidth=100)
+        tree_scroll = ttk.Scrollbar(list_frame, orient=tk.VERTICAL, command=self.tree.yview)
+        self.tree.configure(yscrollcommand=tree_scroll.set)
+        self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        tree_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self.tree.bind("<<TreeviewSelect>>", self._on_select)
+
+        # 詳細部分
+        detail_outer = ttk.Frame(paned)
+        paned.add(detail_outer, stretch="never", width=280)
+
+        detail_frame = ttk.LabelFrame(detail_outer, text="詳細", padding="8")
+        detail_frame.pack(fill=tk.BOTH, expand=True)
+
+        self.detail_labels: dict[str, tk.StringVar] = {}
+        fields = [
+            ("日時", "timestamp"), ("種別", "type"), ("キャラ名", "char_name"),
+            ("voice_id", "voice_id"), ("プロンプト強度", "guidance_scale"),
+            ("変化量", "prompt_strength"), ("ベースボイス", "base_voice"),
+        ]
+        for label_text, key in fields:
+            row = ttk.Frame(detail_frame)
+            row.pack(fill=tk.X, pady=1)
+            ttk.Label(row, text=f"{label_text}:", width=14, anchor=tk.W).pack(side=tk.LEFT)
+            var = tk.StringVar(value="")
+            self.detail_labels[key] = var
+            ttk.Label(row, textvariable=var, wraplength=180, anchor=tk.W).pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        ttk.Label(detail_frame, text="プロンプト:").pack(anchor=tk.W, pady=(8, 2))
+        self.prompt_text = tk.Text(detail_frame, height=8, wrap=tk.WORD, state=tk.DISABLED)
+        self.prompt_text.pack(fill=tk.BOTH, expand=True, pady=(0, 8))
+
+        # ボタン
+        btn_frame = ttk.Frame(detail_frame)
+        btn_frame.pack(fill=tk.X, pady=(4, 0))
+        self.play_btn = ttk.Button(btn_frame, text="▶ 再生", command=self._play_voice, state=tk.DISABLED)
+        self.play_btn.pack(side=tk.LEFT, padx=(0, 5))
+        self.reuse_btn = ttk.Button(btn_frame, text="設定を再利用", command=self._reuse_settings, state=tk.DISABLED)
+        self.reuse_btn.pack(side=tk.LEFT)
+
+    def _load_history(self):
+        self.entries.clear()
+        self.tree.delete(*self.tree.get_children())
+        if not os.path.exists(VOICE_LOG_PATH):
+            self.count_label.config(text="0件")
+            return
+        try:
+            with open(VOICE_LOG_PATH, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        self.entries.append(json.loads(line))
+                    except json.JSONDecodeError:
+                        continue
+        except Exception:
+            self.count_label.config(text="読み込みエラー")
+            return
+
+        # 新しい順
+        self.entries.reverse()
+        if len(self.entries) > self.MAX_ENTRIES:
+            self.entries = self.entries[:self.MAX_ENTRIES]
+
+        for entry in self.entries:
+            ts = entry.get("timestamp", "")[:16].replace("T", " ")
+            etype = "デザイン" if entry.get("type") == "design" else "リミックス"
+            name = entry.get("char_name", "")
+            prompt = entry.get("prompt", "")[:50]
+            self.tree.insert("", tk.END, values=(ts, etype, name, prompt))
+
+        self.count_label.config(text=f"{len(self.entries)}件")
+
+    def _on_select(self, event):
+        sel = self.tree.selection()
+        if not sel:
+            return
+        idx = self.tree.index(sel[0])
+        if idx >= len(self.entries):
+            return
+        entry = self.entries[idx]
+        self.selected_entry = entry
+
+        self.detail_labels["timestamp"].set(entry.get("timestamp", "")[:19].replace("T", " "))
+        self.detail_labels["type"].set("デザイン" if entry.get("type") == "design" else "リミックス")
+        self.detail_labels["char_name"].set(entry.get("char_name", ""))
+        self.detail_labels["voice_id"].set(entry.get("voice_id", ""))
+        self.detail_labels["guidance_scale"].set(f'{entry.get("guidance_scale", ""):.1f}' if isinstance(entry.get("guidance_scale"), (int, float)) else "")
+        self.detail_labels["prompt_strength"].set(f'{entry.get("prompt_strength", ""):.2f}' if isinstance(entry.get("prompt_strength"), (int, float)) else "-")
+        self.detail_labels["base_voice"].set(entry.get("base_voice", "-"))
+
+        self.prompt_text.config(state=tk.NORMAL)
+        self.prompt_text.delete("1.0", tk.END)
+        self.prompt_text.insert("1.0", entry.get("prompt", ""))
+        self.prompt_text.config(state=tk.DISABLED)
+
+        self.play_btn.config(state=tk.NORMAL)
+        self.reuse_btn.config(state=tk.NORMAL)
+
+    def _play_voice(self):
+        if not self.selected_entry:
+            return
+        voice_id = self.selected_entry.get("voice_id", "")
+        if not voice_id:
+            messagebox.showwarning("警告", "voice_idがありません")
+            return
+        self.play_btn.config(state=tk.DISABLED)
+        self.log(f"再生中... (voice_id: {voice_id[:12]}...)")
+
+        def _do():
+            try:
+                client = get_elevenlabs_client()
+                audio = client.text_to_speech.convert(
+                    voice_id=voice_id,
+                    text="こんにちは先生！今日はいい天気ですね！",
+                    model_id="eleven_v3",
+                    language_code="ja",
+                    output_format="mp3_44100_128",
+                )
+                tmp = tempfile.NamedTemporaryFile(suffix=".mp3", prefix="history_", delete=False)
+                for chunk in audio:
+                    tmp.write(chunk)
+                tmp.close()
+                os.startfile(tmp.name)
+                self.log("再生開始")
+            except Exception as e:
+                err = str(e)
+                if "voice" in err.lower() and ("not found" in err.lower() or "404" in err):
+                    self.log("エラー: このボイスはElevenLabsから削除されています")
+                else:
+                    self.log(f"再生エラー: {err}")
+            finally:
+                self.play_btn.winfo_toplevel().after(0, lambda: self.play_btn.config(state=tk.NORMAL))
+
+        threading.Thread(target=_do, daemon=True).start()
+
+    def _reuse_settings(self):
+        if not self.selected_entry:
+            return
+        entry = self.selected_entry
+        if entry.get("type") == "design":
+            # デザインタブに設定をコピー
+            tab = self.design_tab
+            tab.desc_text.delete("1.0", tk.END)
+            tab.desc_text.insert("1.0", entry.get("prompt", ""))
+            tab.guidance_var.set(entry.get("guidance_scale", 2.0))
+            tab.char_name_var.set(entry.get("char_name", ""))
+            self.notebook.select(0)
+            self.log(f"デザインタブに設定をコピーしました: {entry.get('char_name', '')}")
+        else:
+            # リミックスタブに設定をコピー
+            tab = self.remix_tab
+            tab.desc_text.delete("1.0", tk.END)
+            tab.desc_text.insert("1.0", entry.get("prompt", ""))
+            tab.guidance_var.set(entry.get("guidance_scale", 2.0))
+            tab.prompt_strength_var.set(entry.get("prompt_strength", 0.5))
+            tab.char_name_var.set(entry.get("char_name", ""))
+            # ベースボイスをセット
+            base = entry.get("base_voice", "")
+            if base:
+                try:
+                    tab.voice_var.set(base)
+                except Exception:
+                    pass
+            self.notebook.select(1)
+            self.log(f"リミックスタブに設定をコピーしました: {entry.get('char_name', '')}")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # メインウィンドウ
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -697,7 +911,7 @@ class MainApp:
     def __init__(self, root):
         self.root = root
         self.root.title("ElevenLabs ボイスツール")
-        self.root.geometry("600x860")
+        self.root.geometry("600x860+1000+1080")  # 下画面（DISPLAY2: X=930~, Y=1080~）上端に配置
         self.root.minsize(520, 640)
 
         # 縦分割: 上=タブ、下=ログ（ドラッグで可変）
@@ -712,6 +926,13 @@ class MainApp:
 
         self.design_tab = VoiceDesignTab(notebook, self._log)
         self.remix_tab = VoiceRemixTab(notebook, self._log)
+        self.history_tab = VoiceHistoryTab(notebook, self._log, self.design_tab, self.remix_tab)
+
+        # 履歴タブが選ばれたら自動更新
+        def _on_tab_change(event):
+            if notebook.index("current") == 2:
+                self.history_tab._load_history()
+        notebook.bind("<<NotebookTabChanged>>", _on_tab_change)
 
         # ── 共有ログ ──────────────────────────────────────────────
         log_outer = ttk.Frame(paned)

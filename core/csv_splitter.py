@@ -26,11 +26,15 @@ def split_multi_character_rows(input_path: str, apply_normalization: bool = True
 
             char_name = row[0].strip()
 
-            if '\n' in char_name or '・' in char_name:
+            if '\n' in char_name or '・' in char_name or '＆' in char_name or '&' in char_name:
                 if '\n' in char_name:
                     characters = [c.strip() for c in char_name.split('\n') if c.strip()]
-                else:
+                elif '・' in char_name:
                     characters = [c.strip() for c in char_name.split('・') if c.strip()]
+                elif '＆' in char_name:
+                    characters = [c.strip() for c in char_name.split('＆') if c.strip()]
+                else:
+                    characters = [c.strip() for c in char_name.split('&') if c.strip()]
 
                 if len(characters) > 1:
                     serif = row[1] if len(row) > 1 else ''

@@ -312,6 +312,89 @@ def print_tachie_check(issues: list, check_type: str = "テンプレート"):
             print(f"    ✗ {name} ({field}): {path}")
 
 
+def check_characters_exist(
+    split_csv: str,
+    tachie_dir: str,
+    template_path: str,
+) -> tuple[list[str], list[str]]:
+    """台本のキャラが口パク立ち絵フォルダとテンプレートymmpに存在するかチェック
+
+    口パク立ち絵チェックは以下のいずれかを満たせばOK:
+        1. キャラ名と同名のフォルダが口パク立ち絵ディレクトリにある
+        2. テンプレートymmpでそのキャラのDirectoryが有効なパスに設定されている
+           （別キャラと立ち絵を共有するケース: ゴルコンダ→ゴルゴンダ&デカルコマニー等）
+
+    Returns:
+        (口パク立ち絵に無いキャラ一覧, テンプレートに未登録のキャラ一覧)
+    """
+    # split CSVからキャラ一覧取得（ナレーション除外）
+    script_chars = set()
+    try:
+        encodings = ['utf-8-sig', 'utf-8', 'cp932']
+        for enc in encodings:
+            try:
+                with open(split_csv, 'r', encoding=enc, newline='') as f:
+                    reader = csv.reader(f)
+                    header = next(reader, None)
+                    if not header:
+                        break
+                    has_serial = (header[0] == '連番')
+                    char_col = 1 if has_serial else 0
+                    for row in reader:
+                        if len(row) > char_col:
+                            char = row[char_col].strip()
+                            if char and char != 'ナレーション':
+                                script_chars.add(char)
+                break
+            except UnicodeDecodeError:
+                continue
+    except Exception:
+        return [], []
+
+    if not script_chars:
+        return [], []
+
+    # 口パク立ち絵フォルダのサブフォルダ一覧
+    tachie_folders = set()
+    if os.path.isdir(tachie_dir):
+        tachie_folders = {d for d in os.listdir(tachie_dir) if os.path.isdir(os.path.join(tachie_dir, d))}
+
+    # テンプレートymmpの登録キャラ一覧
+    template_chars = set()
+    if template_path and os.path.exists(template_path):
+        try:
+            with open(template_path, 'r', encoding='utf-8-sig') as f:
+                data = json.load(f)
+            for c in data.get('Characters', []):
+                template_chars.add(c.get('Name', ''))
+        except Exception:
+            pass
+
+    # テンプレートに登録されているキャラのDirectoryも確認
+    # テンプレートにキャラがあり、Directoryが有効なら口パク立ち絵チェックはパス
+    chars_with_valid_dir = set()
+    if template_path and os.path.exists(template_path):
+        try:
+            with open(template_path, 'r', encoding='utf-8-sig') as f:
+                tpl_data = json.load(f)
+            for c in tpl_data.get('Characters', []):
+                name = c.get('Name', '')
+                char_param = c.get('TachieCharacterParameter') or {}
+                directory = char_param.get('Directory', '')
+                if directory and os.path.isdir(directory):
+                    chars_with_valid_dir.add(name)
+        except Exception:
+            pass
+
+    # 口パク立ち絵: フォルダ名一致 OR テンプレートで有効なDirectoryが設定済み
+    missing_tachie = sorted(
+        script_chars - tachie_folders - chars_with_valid_dir
+    )
+    missing_template = sorted(script_chars - template_chars)
+
+    return missing_tachie, missing_template
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # メイン パイプライン
 # ══════════════════════════════════════════════════════════════════════════════
@@ -370,6 +453,26 @@ def run_pipeline(
     if not ok and not force:
         print("ERROR: 整合性チェックに失敗しました。--force で強制続行できます。")
         sys.exit(1)
+
+    # ── STEP 1.5: キャラ存在チェック（口パク立ち絵 & テンプレート） ──
+    ymm4_config = config.get('ymm4', {})
+    tachie_dir = ymm4_config.get('tachie_dir', r'D:\YMM4編集\ブルアカ教室\口パク立ち絵')
+    template_path = ymm4_config.get('template_path', '')
+    print("─" * 40)
+    print("STEP 1.5: キャラ存在チェック（口パク立ち絵 & テンプレート）")
+    print("─" * 40)
+    missing_tachie, missing_template = check_characters_exist(
+        split_csv, tachie_dir, template_path
+    )
+    if not missing_tachie and not missing_template:
+        print("  ✓ 全キャラが口パク立ち絵・テンプレートに存在します")
+    else:
+        if missing_tachie:
+            print(f"  ⚠ 口パク立ち絵フォルダに無いキャラ: {', '.join(missing_tachie)}")
+        if missing_template:
+            print(f"  ⚠ テンプレートymmpに未登録のキャラ: {', '.join(missing_template)}")
+        print("  → YMM4上でキャラ登録してからパイプラインを再実行してください")
+    print()
 
     if skip_voice:
         print("(--skip-voice: ボイス生成をスキップ)")
