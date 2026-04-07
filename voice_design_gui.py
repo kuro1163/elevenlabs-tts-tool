@@ -369,7 +369,7 @@ class VoiceRemixTab:
         self.voice_var = tk.StringVar()
         self.voice_combo = ttk.Combobox(vrow, textvariable=self.voice_var,
                                         values=voice_names, state='readonly', width=24,
-                                        height=8)
+                                        height=30)
         if voice_names:
             self.voice_combo.set(voice_names[0])
         self.voice_combo.pack(side=tk.LEFT)
@@ -913,6 +913,23 @@ class MainApp:
         self.root.title("ElevenLabs ボイスツール")
         self.root.geometry("600x860+1000+1080")  # 下画面（DISPLAY2: X=930~, Y=1080~）上端に配置
         self.root.minsize(520, 640)
+
+        # Comboboxのドロップダウンを常に下方向に開くようパッチ
+        self.root.tk.eval('''
+proc ::ttk::combobox::PlacePopdown {cb popdown} {
+    set x [winfo rootx $cb]
+    set y [winfo rooty $cb]
+    set w [winfo width $cb]
+    set h [winfo height $cb]
+    set style [$cb cget -style]
+    if { $style eq {} } { set style TCombobox }
+    set postoffset [ttk::style lookup $style -postoffset {} {0 0 0 0}]
+    foreach var {x y w h} delta $postoffset { incr $var $delta }
+    set H [winfo reqheight $popdown]
+    set Y [expr {$y + $h}]
+    wm geometry $popdown ${w}x${H}+${x}+${Y}
+}
+''')
 
         # 縦分割: 上=タブ、下=ログ（ドラッグで可変）
         paned = tk.PanedWindow(root, orient=tk.VERTICAL, sashrelief=tk.RAISED, sashwidth=5)
