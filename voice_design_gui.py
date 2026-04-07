@@ -24,6 +24,8 @@ if BASE_DIR not in sys.path:
 from utils import load_config, save_config, get_client as get_elevenlabs_client
 
 VOICE_LOG_PATH = os.path.join(BASE_DIR, "voice_design_log.jsonl")
+PREVIEW_DIR = os.path.join(BASE_DIR, "output", "previews")
+os.makedirs(PREVIEW_DIR, exist_ok=True)
 
 
 def append_voice_log(entry: dict):
@@ -220,15 +222,27 @@ class VoiceDesignTab:
                     except Exception as e:
                         self.log(f"  base64デコード失敗: {e}")
 
-                tmp = tempfile.NamedTemporaryFile(suffix='.mp3', delete=False,
-                                                  prefix=f'voice_preview_{i}_')
-                tmp.write(audio_bytes)
-                tmp.close()
-
                 vid = getattr(preview, 'generated_voice_id', f'preview_{i}')
+                preview_path = os.path.join(PREVIEW_DIR, f"{vid}.mp3")
+                with open(preview_path, 'wb') as pf:
+                    pf.write(audio_bytes)
+
                 self.previews.append({'generated_voice_id': vid,
                                       'audio_bytes': audio_bytes,
-                                      'temp_path': tmp.name})
+                                      'temp_path': preview_path})
+
+                # プレビュー候補をログに記録
+                append_voice_log({
+                    "type": "preview_design",
+                    "char_name": "",
+                    "voice_id": vid,
+                    "generated_voice_id": vid,
+                    "prompt": desc,
+                    "guidance_scale": guidance,
+                    "preview_index": i,
+                    "preview_count": gen_count,
+                    "timestamp": datetime.now().isoformat(),
+                })
 
                 def update_row(idx=i, voice_id=vid):
                     self.preview_rows[idx]['label'].config(text=f"#{idx+1} {voice_id[:24]}...")
@@ -578,15 +592,30 @@ class VoiceRemixTab:
                     except Exception as e:
                         self.log(f"  base64デコード失敗: {e}")
 
-                tmp = tempfile.NamedTemporaryFile(suffix='.mp3', delete=False,
-                                                  prefix=f'voice_remix_{i}_')
-                tmp.write(audio_bytes)
-                tmp.close()
-
                 vid = getattr(preview, 'generated_voice_id', f'remix_{i}')
+                preview_path = os.path.join(PREVIEW_DIR, f"{vid}.mp3")
+                with open(preview_path, 'wb') as pf:
+                    pf.write(audio_bytes)
+
                 self.previews.append({'generated_voice_id': vid,
                                       'audio_bytes': audio_bytes,
-                                      'temp_path': tmp.name})
+                                      'temp_path': preview_path})
+
+                # プレビュー候補をログに記録
+                append_voice_log({
+                    "type": "preview_remix",
+                    "char_name": "",
+                    "voice_id": vid,
+                    "generated_voice_id": vid,
+                    "base_voice": self.voice_var.get(),
+                    "base_voice_id": voice_id,
+                    "prompt": desc,
+                    "guidance_scale": guidance,
+                    "prompt_strength": prompt_strength,
+                    "preview_index": i,
+                    "preview_count": gen_count,
+                    "timestamp": datetime.now().isoformat(),
+                })
 
                 def update_row(idx=i, voice_id=vid):
                     self.preview_rows[idx]['label'].config(text=f"#{idx+1} {voice_id[:24]}...")
@@ -801,7 +830,9 @@ class VoiceHistoryTab:
 
         for entry in self.entries:
             ts = entry.get("timestamp", "")[:16].replace("T", " ")
-            etype = "デザイン" if entry.get("type") == "design" else "リミックス"
+            type_map = {"design": "デザイン", "remix": "リミックス",
+                        "preview_design": "候補(デザイン)", "preview_remix": "候補(リミックス)"}
+            etype = type_map.get(entry.get("type", ""), entry.get("type", ""))
             name = entry.get("char_name", "")
             prompt = entry.get("prompt", "")[:50]
             self.tree.insert("", tk.END, values=(ts, etype, name, prompt))
@@ -819,7 +850,9 @@ class VoiceHistoryTab:
         self.selected_entry = entry
 
         self.detail_labels["timestamp"].set(entry.get("timestamp", "")[:19].replace("T", " "))
-        self.detail_labels["type"].set("デザイン" if entry.get("type") == "design" else "リミックス")
+        type_map = {"design": "デザイン", "remix": "リミックス",
+                    "preview_design": "候補(デザイン)", "preview_remix": "候補(リミックス)"}
+        self.detail_labels["type"].set(type_map.get(entry.get("type", ""), entry.get("type", "")))
         self.detail_labels["char_name"].set(entry.get("char_name", ""))
         self.detail_labels["voice_id"].set(entry.get("voice_id", ""))
         self.detail_labels["guidance_scale"].set(f'{entry.get("guidance_scale", ""):.1f}' if isinstance(entry.get("guidance_scale"), (int, float)) else "")
@@ -831,7 +864,10 @@ class VoiceHistoryTab:
         self.prompt_text.insert("1.0", entry.get("prompt", ""))
         self.prompt_text.config(state=tk.DISABLED)
 
-        self.play_btn.config(state=tk.NORMAL)
+        # ローカルにプレビュー音声があるか、保存済みボイスなら再生可能
+        local_exists = os.path.exists(os.path.join(PREVIEW_DIR, f"{entry.get('voice_id', '')}.mp3"))
+        is_saved = entry.get("type") in ("design", "remix")
+        self.play_btn.config(state=tk.NORMAL if (local_exists or is_saved) else tk.DISABLED)
         self.reuse_btn.config(state=tk.NORMAL)
 
     def _play_voice(self):
@@ -841,8 +877,17 @@ class VoiceHistoryTab:
         if not voice_id:
             messagebox.showwarning("警告", "voice_idがありません")
             return
+
+        # ローカルにプレビュー音声があればそれを再生
+        local_path = os.path.join(PREVIEW_DIR, f"{voice_id}.mp3")
+        if os.path.exists(local_path):
+            os.startfile(local_path)
+            self.log(f"ローカル再生: {voice_id[:12]}...")
+            return
+
+        # なければAPI経由で再生（保存済みボイスのみ）
         self.play_btn.config(state=tk.DISABLED)
-        self.log(f"再生中... (voice_id: {voice_id[:12]}...)")
+        self.log(f"API再生中... (voice_id: {voice_id[:12]}...)")
 
         def _do():
             try:
@@ -875,7 +920,7 @@ class VoiceHistoryTab:
         if not self.selected_entry:
             return
         entry = self.selected_entry
-        if entry.get("type") == "design":
+        if entry.get("type") in ("design", "preview_design"):
             # デザインタブに設定をコピー
             tab = self.design_tab
             tab.desc_text.delete("1.0", tk.END)
