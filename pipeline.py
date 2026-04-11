@@ -522,6 +522,17 @@ def run_pipeline(
                     print(f"    - #{r['index']} {r['character']}: {r['reason']}")
             print()
 
+    # ── STEP 2.5: 末尾無音トリミング ──
+    print("─" * 40)
+    print("STEP 2.5: 末尾無音トリミング")
+    print("─" * 40)
+    try:
+        from verify_voice import trim_trailing_silence
+        trimmed = trim_trailing_silence(voice_output_dir, verbose=True)
+    except ImportError:
+        print("  verify_voice.py が見つかりません。スキップ。")
+    print()
+
     # ── STEP 3: MP3整合性チェック ──
     print("─" * 40)
     print("STEP 3: MP3整合性チェック")

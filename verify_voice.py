@@ -64,6 +64,70 @@ def calc_similarity(expected, actual):
     return match_chars / len(expected)
 
 
+def trim_trailing_silence(
+    voice_dir: str,
+    silence_thresh: int = -45,
+    min_trailing_ms: int = 500,
+    keep_ms: int = 100,
+    verbose: bool = True,
+) -> list[tuple[str, int, int]]:
+    """末尾無音をトリミング
+
+    Args:
+        voice_dir: MP3フォルダ
+        silence_thresh: 無音判定の閾値(dBFS)
+        min_trailing_ms: この長さ以上の末尾無音をトリミング対象とする
+        keep_ms: トリミング後に残す余白(ms)
+        verbose: 進捗表示
+
+    Returns:
+        トリミングしたファイルのリスト [(filename, old_dur, new_dur), ...]
+    """
+    from pydub.silence import detect_nonsilent
+
+    mp3s = sorted(f for f in os.listdir(voice_dir) if f.endswith('.mp3') and '_pretrim' not in f)
+    trimmed = []
+
+    for fname in mp3s:
+        fpath = os.path.join(voice_dir, fname)
+        try:
+            audio = AudioSegment.from_mp3(fpath)
+        except Exception:
+            continue
+
+        dur = len(audio)
+        nonsilent = detect_nonsilent(audio, min_silence_len=100, silence_thresh=silence_thresh, seek_step=10)
+
+        if not nonsilent:
+            continue
+
+        trailing = dur - nonsilent[-1][1]
+        if trailing < min_trailing_ms:
+            continue
+
+        end_pos = min(nonsilent[-1][1] + keep_ms, dur)
+        trimmed_audio = audio[:end_pos]
+        trimmed_audio.export(fpath, format='mp3', bitrate='192k')
+        trimmed.append((fname, dur, len(trimmed_audio)))
+
+    if verbose:
+        print(f"\n{'='*60}")
+        print(f"末尾無音トリミング（全{len(mp3s)}件スキャン）")
+        print(f"{'='*60}")
+        print(f"  閾値: {silence_thresh}dBFS, 対象: {min_trailing_ms}ms以上, 残す余白: {keep_ms}ms")
+        if trimmed:
+            total_saved = sum(old - new for _, old, new in trimmed)
+            print(f"  トリミング: {len(trimmed)}件, 合計短縮: {total_saved}ms ({total_saved/1000:.1f}秒)")
+            for fname, old, new in sorted(trimmed, key=lambda x: x[1] - x[2], reverse=True)[:10]:
+                print(f"    {old - new:5d}ms短縮 | {old:5d} -> {new:5d}ms | {fname[:60]}")
+            if len(trimmed) > 10:
+                print(f"    ... 他{len(trimmed) - 10}件")
+        else:
+            print("  対象なし OK")
+
+    return trimmed
+
+
 def check_durations(csv_path, voice_dir, verbose=True):
     """音声長チェック: 文字数に対して異常に長いファイルを検出"""
     with open(csv_path, 'r', encoding='utf-8-sig') as f:
